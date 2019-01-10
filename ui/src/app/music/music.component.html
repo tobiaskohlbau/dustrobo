@@ -1,0 +1,7 @@
+<mat-form-field>
+    <input matInput #url>
+</mat-form-field>
+<mat-slider min="0" max="1" step="0.1" value="0.5" (change)="onVolume($event)"></mat-slider>
+<button mat-button (click)="play(url.value)">Play</button>
+<button mat-button (click)="pause()">{{ paused ? 'Resume' : 'Pause' }}</button>
+<button mat-button (click)="stop()">Stop</button>

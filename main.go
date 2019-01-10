@@ -1,43 +1,62 @@
 package main
 
 import (
-	"fmt"
-	"io"
+	"flag"
+	"log"
 	"net/http"
-	"os"
+	"strings"
 
-	"github.com/hajimehoshi/go-mp3"
-	"github.com/hajimehoshi/oto"
+	"github.com/go-chi/chi"
+	"github.com/rakyll/statik/fs"
+
+	"github.com/tobiaskohlbau/dustrobo/api"
+	_ "github.com/tobiaskohlbau/dustrobo/statik"
 )
 
 func main() {
-	if len(os.Args) < 1 {
-		fmt.Println("missing audio url")
-		os.Exit(1)
-	}
-	res, err := http.Get(os.Args[1])
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	defer res.Body.Close()
+	ui := flag.Bool("ui", false, "enable ui")
+	flag.Parse()
 
-	d, err := mp3.NewDecoder(res.Body)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	defer d.Close()
+	r := chi.NewRouter()
+	r.Mount("/api", api.NewHandler())
 
-	p, err := oto.NewPlayer(d.SampleRate(), 2, 2, 8192)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	defer p.Close()
+	if *ui {
+		statikFS, err := fs.New()
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	if _, err := io.Copy(p, d); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		r.Mount("/", http.RedirectHandler("/ui/", http.StatusMovedPermanently))
+		FileServer(r, "/ui", statikFS)
 	}
+
+	log.Fatal(http.ListenAndServe(":8080", r))
+}
+
+func FileServer(r chi.Router, path string, root http.FileSystem) {
+	if strings.ContainsAny(path, "{}*") {
+		panic("FileServer does not permit URL parameters.")
+	}
+
+	fileSystem := http.StripPrefix(path, http.FileServer(root))
+
+	if path != "/" && path[len(path)-1] != '/' {
+		r.Get(path, http.RedirectHandler(path+"/", http.StatusMovedPermanently).ServeHTTP)
+		path += "/"
+	}
+	path += "*"
+
+	r.Get(path, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, ".js") || strings.Contains(r.URL.Path, ".css") || strings.Contains(r.URL.Path, ".html") {
+			fileSystem.ServeHTTP(w, r)
+			return
+		}
+
+		data, err := fs.ReadFile(root, "/index.html")
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+			return
+		}
+		w.Write(data)
+	}))
 }
